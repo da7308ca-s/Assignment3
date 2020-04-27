@@ -19,9 +19,12 @@ public class Localizer implements EstimatorInterface {
     private float[][] state;
     private float[] alphas;
     public ArrayList<Double> dists;
+    public ArrayList<Double> guesses;
+    public ArrayList<Double> sensor_readings;
     public ArrayList<Double> averages;
+    public ArrayList<Double> averages_guesses;
+    public ArrayList<Double> averages_sensor;
     private int stepCounter;
-
 
     public Localizer(int rows, int cols, int head) {
         this.rows = rows;
@@ -43,6 +46,10 @@ public class Localizer implements EstimatorInterface {
 
         this.dists = new ArrayList();
         this.averages = new ArrayList();
+        this.guesses = new ArrayList<>();
+        this.averages_guesses = new ArrayList<>();
+        this.sensor_readings = new ArrayList<>();
+        this.averages_sensor = new ArrayList<>();
         this.stepCounter = 0;
     }
 
@@ -229,14 +236,23 @@ public class Localizer implements EstimatorInterface {
                 alphas[i*cols+j] = 1/sum;
             }
         }
+
         float sum = 0;
         for(int r = 0; r<rows;r++){
             for(int c = 0; c<cols; c++){
-                float p = 0.325f;
-                if((r==0 || r>=rows) && (c==0 || c>=cols)){
-                    p = 0.625f;
-                }else if((r==0 || r>=rows) || (c==0 || c>=cols)){
-                    p = 0.5f;
+                float p = 1.0f;
+                for(int i = -2; i<3; i++){
+                    for(int j = -2; j<3; j++){
+                        int x = r+i;
+                        int y = c+j;
+                        if ((Math.abs(i) == 2 || Math.abs(j) == 2) && x>=0 && x<rows && y>=0 && y<cols){
+                            p-=0.025f;
+                        }else if ((Math.abs(i) == 1 || Math.abs(j) == 1) && x>=0 && x<rows && y>=0 && y<cols) {
+                            p -= 0.05f;
+                        }else if ((Math.abs(i) == 0 || Math.abs(j) == 0) && x>=0 && x<rows && y>=0 && y<cols){
+                            p-=0.1f;
+                        }
+                    }
                 }
                 for(int h = 0; h<head; h++){
                     this.s_model[rows*cols][r*cols*head+c*head+h][r*cols*head+c*head+h] = p;
@@ -245,6 +261,7 @@ public class Localizer implements EstimatorInterface {
             }
         }
         alphas[rows*cols] = 1/sum;
+
     }
 
     private void setUpInitialState(){
@@ -277,7 +294,7 @@ public class Localizer implements EstimatorInterface {
      * positions (x, y)).
      */
     public double getOrXY(int rX, int rY, int x, int y, int h) {
-        System.out.println("Getting" + rX + " " + rY + " " + x + " "  + y + " " + h);
+        //System.out.println("Getting" + rX + " " + rY + " " + x + " "  + y + " " + h);
         if(rX == -1 && rY == -1)
             return (double)this.s_model[rows*cols][x*cols*head+y*head+h][x*cols*head+y*head+h];
         return (double)this.s_model[rX*cols+rY][x*cols*head+y*head+h][x*cols*head+y*head+h];
@@ -349,8 +366,11 @@ public class Localizer implements EstimatorInterface {
     }
 
     public double manhattan(int[] a, int[] b){
-        System.out.println(a[0] + " " + a[1] + " " + b[0] + " " + b[1]);
         return Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]);
+    }
+
+    public int[] guessLocation(){
+        return new int[]{rand.nextInt(rows),rand.nextInt(cols)};
     }
 
     public void moveRobot(){
@@ -383,19 +403,29 @@ public class Localizer implements EstimatorInterface {
         moveRobot();
         updateCurrentReading();
         int[] reading = getCurrentReading();
-        //System.out.println("Reading " + reading[0] + " " + reading[1]);
+        System.out.println("Reading " + reading[0] + " " + reading[1]);
+
         float[][] O;
         if(reading[0]==-1 && reading[1]==-1){
             O = s_model[rows*cols];
         }else{
             O = s_model[reading[1]*cols+reading[0]];
         }
+
         state = mul(t_model_T,state);
         state = mul(O,state);
         normalize(state);
+        getCurrentTrueState();
+        getEstimate();
 
         dists.add(manhattan(getCurrentTrueState(),getEstimate()));
+        guesses.add(manhattan(getCurrentTrueState(),guessLocation()));
+        if(reading[0]!=-1 && reading[1]!=-1){
+            sensor_readings.add(manhattan(getCurrentTrueState(),reading));
+        }
         stepCounter++;
+
+        //normal
         String text = "Step " + stepCounter+":";
         double sum = 0;
         for(double d: dists){
@@ -406,6 +436,40 @@ public class Localizer implements EstimatorInterface {
         averages.add(sum/stepCounter);
         text = "Average:";
         for(double d: averages){
+            text += " " + d;
+        }
+        System.out.println(text);
+
+        //guesses
+        text = "Guess:";
+        sum = 0;
+        for(double d: guesses){
+            text += " " + d;
+            sum+= d;
+        }
+        System.out.println(text);
+        averages_guesses.add(sum/stepCounter);
+        text = "Average:";
+        for(double d: averages_guesses){
+            text += " " + d;
+        }
+        System.out.println(text);
+
+        //sensor
+        text = "Sensor:";
+        sum = 0;
+        for(double d: sensor_readings){
+            text += " " + d;
+            sum+= d;
+        }
+        System.out.println(text);
+        if(sensor_readings.size() > 0){
+            averages_sensor.add(sum/sensor_readings.size());
+        }else{
+            averages_sensor.add(0.0);
+        }
+        text = "Average:";
+        for(double d: averages_sensor){
             text += " " + d;
         }
         System.out.println(text);
